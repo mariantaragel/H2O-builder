@@ -1,8 +1,8 @@
 EXECUTABLE = h2o-builder
 CC = gcc
-CFLAGS = -std=gnu99 -Wall -Wextra -Werror -pedantic
+CFLAGS = -std=gnu99 -Wall -Wextra -Werror -pedantic -pthread
 ZIP_FILE = proj2.zip
-.PHONY: all pack
+.PHONY: all pack clean
 
 all: main.c
 	$(CC) $(CFLAGS) -o $(EXECUTABLE) $^
