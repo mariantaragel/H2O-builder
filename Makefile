@@ -13,4 +13,4 @@ $(ZIP_FILE): *.c *.h Makefile
 	zip -j $@ $^
 
 clean:
-	rm -f $(EXECUTABLE) *.o $(ZIP_FILE)
+	rm -f $(EXECUTABLE) *.o $(ZIP_FILE) *.out

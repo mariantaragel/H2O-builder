@@ -2,7 +2,7 @@
  * @name main.c
  * @brief Multiple processes programming project
  * @authors Marián Tarageľ
- * @date 18.4.2022
+ * @date 19.4.2022
  */
 
 #define _DEFAULT_SOURCE
@@ -18,94 +18,126 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include "main.h"
-#include "main.h"
 
-int *a = NULL;
+int *count_actions = NULL;
+int *oxygens = NULL;
+int *hydrogens = NULL;
 
-void handle_error(char *error) {
+void handle_error(char *error)
+{
     perror(error);
     exit(EXIT_FAILURE);
 }
 
-int generate_random_number(int max) {
-    srand(getpid());
-    int num = rand() % (max + 1);
-    return num;
-}
-
-void create_molecule()
+void create_shared_memory()
 {
-    sem_unlink("xtarag01_sem_create_molecule");
-    sem_t *sem_molecule = sem_open("xtarag01_sem_create_molecule", O_CREAT, 0660, 0);
-    if (sem_molecule == SEM_FAILED) {
-        /* code */
+    count_actions = mmap(NULL, sizeof(count_actions), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (count_actions == MAP_FAILED) {
+        handle_error("mmap");
     }
-    
+    else {
+        *count_actions = 0;
+    }
 
+    oxygens = mmap(NULL, sizeof(oxygens), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (oxygens == MAP_FAILED) {
+        handle_error("mmap");
+    }
+    else {
+        *oxygens = 0;
+    }
+
+    hydrogens = mmap(NULL, sizeof(oxygens), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (hydrogens == MAP_FAILED) {
+        handle_error("mmap");
+    }
+    else {
+        *hydrogens = 0;
+    }
 }
 
-void oxygen(int idO, int max_sleep) {
-    sem_unlink("xtarag01_sem_count_actions");
-    sem_t *sem_actions = sem_open("xtarag01_sem_count_actions", O_CREAT, 0660, 1);
-    if (sem_actions == SEM_FAILED) {
-        handle_error("sem_open/xtarag01_sem_count_actions");
+void delete_shared_memory()
+{
+    if (munmap(hydrogens, sizeof(hydrogens)) == -1) {
+        handle_error("munmap");
+    }
+
+    if (munmap(oxygens, sizeof(oxygens)) == -1) {
+        handle_error("munmap");
+    }
+
+    if (munmap(count_actions, sizeof(count_actions)) == -1) {
+        handle_error("munmap");
+    }
+}
+
+int generate_random_number(int max)
+{
+    srand(getpid());
+    int rand_num = rand() % (max + 1);
+    return rand_num;
+}
+
+sem_t* create_semaphores(char *name, int value)
+{
+    sem_unlink(name);
+    sem_t *semaphore = sem_open(name, O_CREAT, 0660, value);
+    if (semaphore == SEM_FAILED) {
+        handle_error("sem_open");
         exit(EXIT_FAILURE);
     }
-    
+    return semaphore;
+}
+
+void delete_semaphores(sem_t *semaphore, char *name)
+{
+    sem_close(semaphore);
+    sem_unlink(name);
+}
+
+void oxygen(int idO, int max_sleep)
+{
+    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
+
     sem_wait(sem_actions);
-    *a += 1;
-    printf("%d: O %d: started\n", *a, idO);
+    *count_actions += 1;
+    printf(STARTED, *count_actions, idO);
     sem_post(sem_actions);
 
     int num = generate_random_number(max_sleep);
     usleep(num);
 
+    //oxygen_create_molecule(idO);
+
     sem_wait(sem_actions);
-    *a += 1;
-    printf("%d: O %d: going to queue\n", *a, idO);
-    sem_post(sem_actions);
-    
-    sem_wait(sem_actions);
-    *a += 1;
-    printf("%d: O %d: ended\n", *a, idO);
+    *count_actions += 1;
+    printf(ENDED, *count_actions, idO);
     sem_post(sem_actions);
 
-    sem_close(sem_actions);
-    sem_unlink("xtarag01_sem_count_actions");
+    delete_semaphores(sem_actions, SEM_ACTIONS);
     exit(0);
 }
 
 void hydrogen(int idH, int max_sleep)
 {
-    sem_unlink("xtarag01_sem_count_actions");
-    sem_t *sem_actions = sem_open("xtarag01_sem_count_actions", O_CREAT, 0660, 1);
-    if (sem_actions == SEM_FAILED) {
-        handle_error("sem_open/xtarag01_sem_count_actions");
-        exit(EXIT_FAILURE);
-    }
+    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
 
     sem_wait(sem_actions);
-    *a += 1;
-    printf("%d: H %d: started\n", *a, idH);
+    *count_actions += 1;
+    printf(STARTED, *count_actions, idH);
     sem_post(sem_actions);
 
     int num = generate_random_number(max_sleep);
     usleep(num);
-    
-    sem_wait(sem_actions);
-    *a += 1;
-    printf("%d: H %d: going to queue\n", *a, idH);
-    sem_post(sem_actions);
 
-    create_molecule();
+    //hydrogen_create_molecule(idH);
 
     sem_wait(sem_actions);
-    *a += 1;
-    printf("%d: H %d: ended\n", *a, idH);
+    *count_actions += 1;
+    printf(ENDED, *count_actions, idH);
     sem_post(sem_actions);
 
-    sem_close(sem_actions);
-    sem_unlink("xtarag01_sem_count_actions");
+    delete_semaphores(sem_actions, SEM_ACTIONS);
     exit(0);
 }
 
@@ -127,7 +159,7 @@ void create_process(int number, void (*function)(int, int), int max_sleep)
 int main(int argc, char *argv[])
 {
     if (argc != 5) {
-        fprintf(stderr, "Usage: ./proj2 NO NH TI TB\n");
+        fprintf(stderr, usage);
         return EXIT_FAILURE;
     }
 
@@ -144,31 +176,26 @@ int main(int argc, char *argv[])
         }
 
         if (endptr == argv[i]) {
-            fprintf(stderr, "No digits were found in argument %d\n", i);
+            fprintf(stderr, NO_DIGITS, i);
             return EXIT_FAILURE;
         }
 
         if ((i == 3 || i == 4) && (args[i - 1] < 0 || args[i - 1] > 1000)) {
-            fprintf(stderr, "Argument %d out of range\n", i);
+            fprintf(stderr, OUT_OF_RANGE, i);
             return EXIT_FAILURE;
         }
     }
 
-    a = mmap(NULL, sizeof(a), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    if (a == MAP_FAILED) {
-        handle_error("mmap");
-    }
-    else {
-        *a = 0;
-    }
-
-    pid_t pid;
-    int status = 0;
+    create_shared_memory();
 
     create_process(args[0], oxygen, args[2]);
     create_process(args[1], hydrogen, args[2]);
 
-    for (int i = 0; i < (args[0] + args[1]); i++) {
+    pid_t pid;
+    int status = 0;
+    int number_of_process = (int)args[0] + (int)args[1];
+    
+    for (int i = 0; i < number_of_process; i++) {
         pid = wait(&status);
         if (pid == -1) {
             perror("waitpid");
@@ -177,12 +204,9 @@ int main(int argc, char *argv[])
         else if (status == 1) {
             exit(EXIT_FAILURE);
         }
-        
     }
 
-    if (munmap(a, sizeof(a)) == -1) {
-        handle_error("munmap");
-    }
+    delete_shared_memory();
 
     printf("End: Main process\n");
 
