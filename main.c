@@ -22,6 +22,7 @@
 int *count_actions = NULL;
 int *oxygens = NULL;
 int *hydrogens = NULL;
+int *count_molecules = NULL;
 
 void handle_error(char *error)
 {
@@ -54,6 +55,14 @@ void create_shared_memory()
     else {
         *hydrogens = 0;
     }
+
+    count_molecules = mmap(NULL, sizeof(count_molecules), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (count_molecules == MAP_FAILED) {
+        handle_error("mmap");
+    }
+    else {
+        *count_molecules = 0;
+    }
 }
 
 void delete_shared_memory()
@@ -69,6 +78,10 @@ void delete_shared_memory()
     if (munmap(count_actions, sizeof(count_actions)) == -1) {
         handle_error("munmap");
     }
+
+    if (munmap(count_molecules, sizeof(count_molecules)) == -1) {
+        handle_error("munmap");
+    }
 }
 
 int generate_random_number(int max)
@@ -81,7 +94,7 @@ int generate_random_number(int max)
 sem_t* create_semaphores(char *name, int value)
 {
     sem_unlink(name);
-    sem_t *semaphore = sem_open(name, O_CREAT, 0660, value);
+    sem_t *semaphore = sem_open(name, O_CREAT, 0666, value);
     if (semaphore == SEM_FAILED) {
         handle_error("sem_open");
         exit(EXIT_FAILURE);
@@ -95,59 +108,156 @@ void delete_semaphores(sem_t *semaphore, char *name)
     sem_unlink(name);
 }
 
-void oxygen(int idO, int max_sleep)
+void oxygen_create_molecule(int idO, int max_time_of_creation)
 {
     sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
+    sem_t *sem_create_molecule = create_semaphores(SEM_CREATE_MOL, 0);
+
+    *count_molecules += 1;
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(STARTED, *count_actions, idO);
+    printf(CREATING_MOL_O, *count_actions, idO, *count_molecules);
     sem_post(sem_actions);
 
-    int num = generate_random_number(max_sleep);
+    int num = generate_random_number(max_time_of_creation);
     usleep(num);
 
-    //oxygen_create_molecule(idO);
+    sem_post(sem_create_molecule);
+    sem_post(sem_create_molecule);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(ENDED, *count_actions, idO);
+    printf(CREATED_MOL_O, *count_actions, idO, *count_molecules);
     sem_post(sem_actions);
 
+    delete_semaphores(sem_create_molecule, SEM_CREATE_MOL);
+    delete_semaphores(sem_actions, SEM_ACTIONS);
+}
+
+void hydrogen_create_molecule(int idH)
+{
+    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
+    sem_t *sem_create_molecule = create_semaphores(SEM_CREATE_MOL, 0);
+
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    printf(CREATING_MOL_H, *count_actions, idH, *count_molecules);
+    sem_post(sem_actions);
+
+    sem_wait(sem_create_molecule);
+    sem_wait(sem_create_molecule);
+
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    printf(CREATED_MOL_H, *count_actions, idH, *count_molecules);
+    sem_post(sem_actions);
+
+    delete_semaphores(sem_create_molecule, SEM_CREATE_MOL);
+    delete_semaphores(sem_actions, SEM_ACTIONS);
+}
+
+void oxygen(int idO, long args[])
+{
+    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
+    sem_t *sem_mutex = create_semaphores(SEM_ACTIONS, 1);
+    sem_t *sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
+    sem_t *sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
+
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    printf(STARTED_O, *count_actions, idO);
+    sem_post(sem_actions);
+
+    int num = generate_random_number((int)args[2]);
+    usleep(num);
+
+    sem_wait(sem_mutex);
+    *oxygens += 1;
+    if ((*hydrogens >= 2) && (*oxygens >= 1)) {
+        sem_post(sem_hydrogen_queue);
+        sem_post(sem_hydrogen_queue);
+        *hydrogens -= 2;
+        sem_post(sem_oxygen_queue);
+        *oxygens -= 1;
+    }
+    sem_post(sem_mutex);
+    
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    printf(QUEUE_O, *count_actions, idO);
+    sem_post(sem_actions);
+
+    //sem_wait(sem_oxygen_queue);
+
+    //oxygen_create_molecule(idO, (int)args[3]);
+
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    printf(ENDED_O, *count_actions, idO);
+    sem_post(sem_actions);
+
+    delete_semaphores(sem_oxygen_queue, SEM_OXY_QUEUE);
+    delete_semaphores(sem_hydrogen_queue, SEM_HYDRO_QUEUE);
+    delete_semaphores(sem_mutex, SEM_MUTEX);
     delete_semaphores(sem_actions, SEM_ACTIONS);
     exit(0);
 }
 
-void hydrogen(int idH, int max_sleep)
+void hydrogen(int idH, long args[])
 {
     sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
+    sem_t *sem_mutex = create_semaphores(SEM_ACTIONS, 1);
+    sem_t *sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
+    sem_t *sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(STARTED, *count_actions, idH);
+    printf(STARTED_H, *count_actions, idH);
     sem_post(sem_actions);
 
-    int num = generate_random_number(max_sleep);
+    int num = generate_random_number((int)args[2]);
     usleep(num);
+
+    sem_wait(sem_mutex);
+    *hydrogens += 1;
+    if ((*hydrogens >= 2) && (*oxygens >= 1)) {
+        sem_post(sem_hydrogen_queue);
+        sem_post(sem_hydrogen_queue);
+        *hydrogens -= 2;
+        sem_post(sem_oxygen_queue);
+        *oxygens -= 1;
+    }
+    sem_post(sem_mutex);
+    
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    printf(QUEUE_H, *count_actions, idH);
+    sem_post(sem_actions);
+
+    //sem_wait(sem_hydrogen_queue);
 
     //hydrogen_create_molecule(idH);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(ENDED, *count_actions, idH);
+    printf(ENDED_H, *count_actions, idH);
     sem_post(sem_actions);
 
+    delete_semaphores(sem_oxygen_queue, SEM_OXY_QUEUE);
+    delete_semaphores(sem_hydrogen_queue, SEM_HYDRO_QUEUE);
+    delete_semaphores(sem_mutex, SEM_MUTEX);
     delete_semaphores(sem_actions, SEM_ACTIONS);
     exit(0);
 }
 
-void create_process(int number, void (*function)(int, int), int max_sleep)
+void create_process(int number, void (*function)(int, long *), long args[])
 {
     pid_t child;
     for (int i = 0; i < number; i++) {
         child = fork();
         if (child == 0) {
-            (*function)(i + 1, max_sleep);
+            (*function)(i + 1, args);
         }
         else if (child == -1) {
             handle_error("fork");
@@ -188,8 +298,8 @@ int main(int argc, char *argv[])
 
     create_shared_memory();
 
-    create_process(args[0], oxygen, args[2]);
-    create_process(args[1], hydrogen, args[2]);
+    create_process(args[0], oxygen, args);
+    create_process(args[1], hydrogen, args);
 
     pid_t pid;
     int status = 0;
