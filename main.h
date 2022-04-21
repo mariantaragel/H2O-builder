@@ -27,12 +27,14 @@ const char usage[] = "Usage: ./proj2 NO NH TI TB\n"
 #define QUEUE_O "%d: O %d: going to queue\n"
 #define CREATING_MOL_O "%d: O %d: creating molecule %d\n"
 #define CREATED_MOL_O "%d: O %d: molecule %d created\n"
+#define NOT_ENOUGH_O "%d: O %d: not enough H\n"
 #define ENDED_O "%d: O %d: ended\n"
 
 #define STARTED_H "%d: H %d: started\n"
 #define QUEUE_H "%d: H %d: going to queue\n"
 #define CREATING_MOL_H "%d: H %d: creating molecule %d\n"
 #define CREATED_MOL_H "%d: H %d: molecule %d created\n"
+#define NOT_ENOUGH_H "%d: H %d: not enough O or H\n"
 #define ENDED_H "%d: H %d: ended\n"
 
 void handle_error(char *error);
@@ -40,6 +42,5 @@ void create_shared_memory();
 void delete_shared_memory();
 int generate_random_number(int max);
 sem_t* create_semaphores(char *name, int value);
-void delete_semaphores(sem_t *semaphore, char *name);
 
 #endif
