@@ -2,7 +2,7 @@
  * @name main.c
  * @brief Multiple processes programming project
  * @authors Marián Tarageľ
- * @date 19.4.2022
+ * @date 24.4.2022
  */
 
 #define _DEFAULT_SOURCE
@@ -17,7 +17,6 @@
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include "main.h"
 
 int *count_actions = NULL;
@@ -26,7 +25,6 @@ int *hydrogens = NULL;
 int *count_molecules = NULL;
 int *num_of_ox = NULL;
 int *num_of_hyd = NULL;
-int *count = NULL;
 FILE **file = NULL;
 
 void handle_error(char *error)
@@ -67,14 +65,6 @@ void create_shared_memory()
     }
     else {
         *count_molecules = 0;
-    }
-
-    count = mmap(NULL, sizeof(count), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    if (count == MAP_FAILED) {
-        handle_error("mmap");
-    }
-    else {
-        *count = 0;
     }
 
     num_of_hyd = mmap(NULL, sizeof(num_of_hyd), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -119,10 +109,6 @@ void delete_shared_memory()
         handle_error("munmap");
     }
 
-    if (munmap(count, sizeof(count)) == -1) {
-        handle_error("munmap");
-    }
-
     if (munmap(file, sizeof(file)) == -1) {
         handle_error("munmap");
     }
@@ -143,11 +129,6 @@ sem_t* create_semaphores(char *name, int value)
         exit(EXIT_FAILURE);
     }
     return semaphore;
-}
-
-void delete_semaphores(sem_t *semaphore)
-{
-    sem_close(semaphore);
 }
 
 void delete_sem_files()
@@ -200,9 +181,9 @@ void oxygen_create_molecule(int idO,int molecule_num, int max_time_of_creation)
     sem_post(sem_create_molecule_h);
     sem_post(sem_create_molecule_h);
 
-    delete_semaphores(sem_create_molecule_o);
-    delete_semaphores(sem_create_molecule_h);
-    delete_semaphores(sem_actions);
+    sem_close(sem_create_molecule_o);
+    sem_close(sem_create_molecule_h);
+    sem_close(sem_actions);
 }
 
 void hydrogen_create_molecule(int idH, int molecule_num)
@@ -227,9 +208,9 @@ void hydrogen_create_molecule(int idH, int molecule_num)
     fflush(*file);
     sem_post(sem_actions);
 
-    delete_semaphores(sem_create_molecule_o);
-    delete_semaphores(sem_create_molecule_h);
-    delete_semaphores(sem_actions);
+    sem_close(sem_create_molecule_o);
+    sem_close(sem_create_molecule_h);
+    sem_close(sem_actions);
 }
 
 void oxygen(int idO, long args[])
@@ -282,8 +263,10 @@ void oxygen(int idO, long args[])
         sem_wait(sem_oxygen_queue);
         if (*num_of_ox >= 1 && *num_of_hyd >= 2) {
             oxygen_create_molecule(idO, *count_molecules, args[3]);
+            
             sem_wait(sem_barier);
             sem_wait(sem_barier);
+            
             *num_of_hyd -= 2;
             *num_of_ox -= 1;
             if (molecules == *count_molecules) {
@@ -294,6 +277,7 @@ void oxygen(int idO, long args[])
                     sem_post(sem_hydrogen_queue);
                 }
             }
+            sem_post(sem_mutex);
         }
         else {
             sem_wait(sem_actions);
@@ -302,14 +286,13 @@ void oxygen(int idO, long args[])
             fflush(*file);
             sem_post(sem_actions);
         }
-        sem_post(sem_mutex);
     }
 
-    delete_semaphores(sem_barier);
-    delete_semaphores(sem_oxygen_queue);
-    delete_semaphores(sem_hydrogen_queue);
-    delete_semaphores(sem_mutex);
-    delete_semaphores(sem_actions);
+    sem_close(sem_barier);
+    sem_close(sem_oxygen_queue);
+    sem_close(sem_hydrogen_queue);
+    sem_close(sem_mutex);
+    sem_close(sem_actions);
     exit(0);
 }
 
@@ -372,11 +355,11 @@ void hydrogen(int idH, long args[])
         }
     }
 
-    delete_semaphores(sem_barier);
-    delete_semaphores(sem_oxygen_queue);
-    delete_semaphores(sem_hydrogen_queue);
-    delete_semaphores(sem_mutex);
-    delete_semaphores(sem_actions);
+    sem_close(sem_barier);
+    sem_close(sem_oxygen_queue);
+    sem_close(sem_hydrogen_queue);
+    sem_close(sem_mutex);
+    sem_close(sem_actions);
     exit(0);
 }
 
@@ -413,13 +396,13 @@ int main(int argc, char *argv[])
             || (errno != 0 && args[i - 1] == 0)) {
                handle_error("strtol");
         }
-
-        if (endptr == argv[i]) {
-            fprintf(stderr, NO_DIGITS, i);
+        
+        if (endptr == argv[i] || *endptr != '\0') {
+            fprintf(stderr, NOT_A_NUMBER, i);
             return EXIT_FAILURE;
         }
 
-        if ((i == 3 || i == 4) && (args[i - 1] < 0 || args[i - 1] > 1000)) {
+        if (args[i - 1] < 0 ||  ((i == 3 || i == 4) && args[i - 1] > 1000)) {
             fprintf(stderr, OUT_OF_RANGE, i);
             return EXIT_FAILURE;
         }
@@ -443,8 +426,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < number_of_process; i++) {
         pid = wait(&status);
         if (pid == -1) {
-            perror("waitpid");
-            exit(EXIT_FAILURE);
+            handle_error("wait");
         }
         else if (status == 1) {
             exit(EXIT_FAILURE);
