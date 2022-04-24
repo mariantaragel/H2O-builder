@@ -17,12 +17,17 @@
 #include <sys/wait.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include "main.h"
 
 int *count_actions = NULL;
 int *oxygens = NULL;
 int *hydrogens = NULL;
 int *count_molecules = NULL;
+int *num_of_ox = NULL;
+int *num_of_hyd = NULL;
+int *count = NULL;
+FILE **file = NULL;
 
 void handle_error(char *error)
 {
@@ -63,6 +68,29 @@ void create_shared_memory()
     else {
         *count_molecules = 0;
     }
+
+    count = mmap(NULL, sizeof(count), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (count == MAP_FAILED) {
+        handle_error("mmap");
+    }
+    else {
+        *count = 0;
+    }
+
+    num_of_hyd = mmap(NULL, sizeof(num_of_hyd), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (num_of_hyd == MAP_FAILED) {
+        handle_error("mmap");
+    }
+    
+    num_of_ox = mmap(NULL, sizeof(num_of_ox), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (num_of_ox == MAP_FAILED) {
+        handle_error("mmap");
+    }
+
+    file = mmap(NULL, sizeof(file), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (file == MAP_FAILED) {
+        handle_error("mmap");
+    }
 }
 
 void delete_shared_memory()
@@ -80,6 +108,22 @@ void delete_shared_memory()
     }
 
     if (munmap(count_molecules, sizeof(count_molecules)) == -1) {
+        handle_error("munmap");
+    }
+
+    if (munmap(num_of_hyd, sizeof(num_of_hyd)) == -1) {
+        handle_error("munmap");
+    }
+
+    if (munmap(num_of_ox, sizeof(num_of_ox)) == -1) {
+        handle_error("munmap");
+    }
+
+    if (munmap(count, sizeof(count)) == -1) {
+        handle_error("munmap");
+    }
+
+    if (munmap(file, sizeof(file)) == -1) {
         handle_error("munmap");
     }
 }
@@ -112,52 +156,79 @@ void delete_sem_files()
     sem_unlink(SEM_MUTEX);
     sem_unlink(SEM_OXY_QUEUE);
     sem_unlink(SEM_HYDRO_QUEUE);
-    sem_unlink(SEM_CREATE_MOL);
+    sem_unlink(SEM_CREATE_MOL_H);
+    sem_unlink(SEM_CREATE_MOL_O);
+    sem_unlink(SEM_BARIER);
+}
+
+int count_num_of_mol(int oxy, int hyd)
+{
+    int result = 0;
+	while(oxy >= 1 && hyd >= 2) {
+		oxy -= 1;
+		hyd -= 2;
+		result += 1;
+	}
+
+    return result;
 }
 
 void oxygen_create_molecule(int idO,int molecule_num, int max_time_of_creation)
 {
     sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
-    sem_t *sem_create_molecule = create_semaphores(SEM_CREATE_MOL, 0);
+    sem_t *sem_create_molecule_o = create_semaphores(SEM_CREATE_MOL_O, 0);
+    sem_t *sem_create_molecule_h = create_semaphores(SEM_CREATE_MOL_H, 0);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(CREATING_MOL_O, *count_actions, idO, molecule_num);
+    fprintf(*file, CREATING_MOL_O, *count_actions, idO, molecule_num);
+    fflush(*file);
     sem_post(sem_actions);
+
+    sem_wait(sem_create_molecule_o);
+    sem_wait(sem_create_molecule_o);
 
     int num = generate_random_number(max_time_of_creation);
-    usleep(num);
-
-    sem_post(sem_create_molecule);
-    sem_post(sem_create_molecule);
+    usleep(num * 1000);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(CREATED_MOL_O, *count_actions, idO, molecule_num);
+    fprintf(*file, CREATED_MOL_O, *count_actions, idO, molecule_num);
+    fflush(*file);
     sem_post(sem_actions);
 
-    delete_semaphores(sem_create_molecule);
+    sem_post(sem_create_molecule_h);
+    sem_post(sem_create_molecule_h);
+
+    delete_semaphores(sem_create_molecule_o);
+    delete_semaphores(sem_create_molecule_h);
     delete_semaphores(sem_actions);
 }
 
 void hydrogen_create_molecule(int idH, int molecule_num)
 {
     sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
-    sem_t *sem_create_molecule = create_semaphores(SEM_CREATE_MOL, 0);
+    sem_t *sem_create_molecule_h = create_semaphores(SEM_CREATE_MOL_H, 0);
+    sem_t *sem_create_molecule_o = create_semaphores(SEM_CREATE_MOL_O, 0);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(CREATING_MOL_H, *count_actions, idH, molecule_num);
+    fprintf(*file, CREATING_MOL_H, *count_actions, idH, molecule_num);
+    fflush(*file);
     sem_post(sem_actions);
 
-    sem_wait(sem_create_molecule);
+    sem_post(sem_create_molecule_o);
+
+    sem_wait(sem_create_molecule_h);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(CREATED_MOL_H, *count_actions, idH, molecule_num);
+    fprintf(*file, CREATED_MOL_H, *count_actions, idH, molecule_num);
+    fflush(*file);
     sem_post(sem_actions);
 
-    delete_semaphores(sem_create_molecule);
+    delete_semaphores(sem_create_molecule_o);
+    delete_semaphores(sem_create_molecule_h);
     delete_semaphores(sem_actions);
 }
 
@@ -167,53 +238,74 @@ void oxygen(int idO, long args[])
     sem_t *sem_mutex = create_semaphores(SEM_MUTEX, 1);
     sem_t *sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
     sem_t *sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
+    sem_t *sem_barier = create_semaphores(SEM_BARIER, 0);
+
+    int molecules = count_num_of_mol(args[0], args[1]);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(STARTED_O, *count_actions, idO);
+    fprintf(*file, STARTED_O, *count_actions, idO);
+    fflush(*file);
     sem_post(sem_actions);
 
     int num = generate_random_number((int)args[2]);
-    usleep(num);
-
-    sem_wait(sem_actions);
-    *count_actions += 1;
-    printf(QUEUE_O, *count_actions, idO);
-    sem_post(sem_actions);
+    usleep(num * 1000);
 
     sem_wait(sem_mutex);
     *oxygens += 1;
     if ((*hydrogens >= 2) && (*oxygens >= 1)) {
+        *count_molecules += 1;
         sem_post(sem_hydrogen_queue);
         sem_post(sem_hydrogen_queue);
         *hydrogens -= 2;
         sem_post(sem_oxygen_queue);
         *oxygens -= 1;
-        *count_molecules += 1;
     }
-    sem_post(sem_mutex);
+    else {
+        sem_post(sem_mutex);
+    }
 
-    /*
-    if (number_of_processes < 3) {
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    fprintf(*file, QUEUE_O, *count_actions, idO);
+    fflush(*file);
+    sem_post(sem_actions);
+
+    if (args[0] < 1 || args[1] < 2) {
         sem_wait(sem_actions);
         *count_actions += 1;
-        printf(NOT_ENOUGH_O, *count_actions, idO);
+        fprintf(*file, NOT_ENOUGH_O, *count_actions, idO);
+        fflush(*file);
         sem_post(sem_actions);
     }
     else {
         sem_wait(sem_oxygen_queue);
+        if (*num_of_ox >= 1 && *num_of_hyd >= 2) {
+            oxygen_create_molecule(idO, *count_molecules, args[3]);
+            sem_wait(sem_barier);
+            sem_wait(sem_barier);
+            *num_of_hyd -= 2;
+            *num_of_ox -= 1;
+            if (molecules == *count_molecules) {
+                for (int i = 0; i < (int)args[0] - *count_molecules; i++) {
+                    sem_post(sem_oxygen_queue);
+                }
+                for (int i = 0; i < (int)args[1] - *count_molecules * 2; i++) {
+                    sem_post(sem_hydrogen_queue);
+                }
+            }
+        }
+        else {
+            sem_wait(sem_actions);
+            *count_actions += 1;
+            fprintf(*file, NOT_ENOUGH_O, *count_actions, idO);
+            fflush(*file);
+            sem_post(sem_actions);
+        }
+        sem_post(sem_mutex);
     }
-    */
 
-    sem_wait(sem_oxygen_queue);
-
-    oxygen_create_molecule(idO, *count_molecules, (int)args[3]);
-
-    sem_wait(sem_actions);
-    *count_actions += 1;
-    printf(ENDED_O, *count_actions, idO);
-    sem_post(sem_actions);
-
+    delete_semaphores(sem_barier);
     delete_semaphores(sem_oxygen_queue);
     delete_semaphores(sem_hydrogen_queue);
     delete_semaphores(sem_mutex);
@@ -227,19 +319,16 @@ void hydrogen(int idH, long args[])
     sem_t *sem_mutex = create_semaphores(SEM_MUTEX, 1);
     sem_t *sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
     sem_t *sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
+    sem_t *sem_barier = create_semaphores(SEM_BARIER, 0);
 
     sem_wait(sem_actions);
     *count_actions += 1;
-    printf(STARTED_H, *count_actions, idH);
+    fprintf(*file, STARTED_H, *count_actions, idH);
+    fflush(*file);
     sem_post(sem_actions);
 
     int num = generate_random_number((int)args[2]);
-    usleep(num);
-
-    sem_wait(sem_actions);
-    *count_actions += 1;
-    printf(QUEUE_H, *count_actions, idH);
-    sem_post(sem_actions);
+    usleep(num * 1000);
 
     sem_wait(sem_mutex);
     *hydrogens += 1;
@@ -251,29 +340,39 @@ void hydrogen(int idH, long args[])
         sem_post(sem_oxygen_queue);
         *oxygens -= 1;
     }
-    sem_post(sem_mutex);
+    else {
+        sem_post(sem_mutex);
+    }
 
-    /*
-    if (number_of_processes < 3) {
+    sem_wait(sem_actions);
+    *count_actions += 1;
+    fprintf(*file, QUEUE_H, *count_actions, idH);
+    fflush(*file);
+    sem_post(sem_actions);
+
+    if (args[0] < 1 || args[1] < 2) {
         sem_wait(sem_actions);
         *count_actions += 1;
-        printf(NOT_ENOUGH_H, *count_actions, idH);
+        fprintf(*file, NOT_ENOUGH_H, *count_actions, idH);
+        fflush(*file);
         sem_post(sem_actions);
     }
     else {
         sem_wait(sem_hydrogen_queue);
+        if (*num_of_ox >= 1 && *num_of_hyd >= 2) {
+            hydrogen_create_molecule(idH, *count_molecules);
+            sem_post(sem_barier);
+        }
+        else {
+            sem_wait(sem_actions);
+            *count_actions += 1;
+            fprintf(*file, NOT_ENOUGH_H, *count_actions, idH);
+            fflush(*file);
+            sem_post(sem_actions);
+        }
     }
-    */
 
-    sem_wait(sem_hydrogen_queue);
-
-    hydrogen_create_molecule(idH, *count_molecules);
-
-    sem_wait(sem_actions);
-    *count_actions += 1;
-    printf(ENDED_H, *count_actions, idH);
-    sem_post(sem_actions);
-
+    delete_semaphores(sem_barier);
     delete_semaphores(sem_oxygen_queue);
     delete_semaphores(sem_hydrogen_queue);
     delete_semaphores(sem_mutex);
@@ -328,6 +427,11 @@ int main(int argc, char *argv[])
 
     create_shared_memory();
     delete_sem_files();
+    remove("proj2.out");
+    *file = fopen("proj2.out", "w");
+
+    *num_of_ox = (int)args[0];
+    *num_of_hyd = (int)args[1];
 
     create_process(args[0], oxygen, args);
     create_process(args[1], hydrogen, args);
@@ -347,9 +451,9 @@ int main(int argc, char *argv[])
         }
     }
 
+    fclose(*file);
+    delete_sem_files();
     delete_shared_memory();
-
-    printf("End: Main process\n");
 
     return EXIT_SUCCESS;
 }

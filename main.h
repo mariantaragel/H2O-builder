@@ -21,7 +21,9 @@ const char usage[] = "Usage: ./proj2 NO NH TI TB\n"
 #define SEM_MUTEX "xtarag01_sem_mutex"
 #define SEM_OXY_QUEUE "xtarag01_sem_oxygen_queue"
 #define SEM_HYDRO_QUEUE "xtarag01_sem_hydrogen_queue"
-#define SEM_CREATE_MOL "xtarag01_sem_create_molecule"
+#define SEM_CREATE_MOL_O "xtarag01_sem_create_molecule_o"
+#define SEM_CREATE_MOL_H "xtarag01_sem_create_molecule_h"
+#define SEM_BARIER "xtarag01_sem_barier"
 
 #define STARTED_O "%d: O %d: started\n"
 #define QUEUE_O "%d: O %d: going to queue\n"
@@ -35,7 +37,6 @@ const char usage[] = "Usage: ./proj2 NO NH TI TB\n"
 #define CREATING_MOL_H "%d: H %d: creating molecule %d\n"
 #define CREATED_MOL_H "%d: H %d: molecule %d created\n"
 #define NOT_ENOUGH_H "%d: H %d: not enough O or H\n"
-#define ENDED_H "%d: H %d: ended\n"
 
 void handle_error(char *error);
 void create_shared_memory();
