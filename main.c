@@ -408,6 +408,11 @@ int main(int argc, char *argv[])
             fprintf(stderr, OUT_OF_RANGE, i);
             return EXIT_FAILURE;
         }
+
+        if (((i == 1 || i == 2) && args[i - 1] <= 0)) {
+            fprintf(stderr, OUT_OF_RANGE, i);
+            return EXIT_FAILURE;
+        }
     }
 
     create_shared_memory();
