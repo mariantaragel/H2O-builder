@@ -288,6 +288,7 @@ void oxygen(int idO, long args[])
         }
     }
 
+    fclose(*file);
     sem_close(sem_barier);
     sem_close(sem_oxygen_queue);
     sem_close(sem_hydrogen_queue);
@@ -355,6 +356,7 @@ void hydrogen(int idH, long args[])
         }
     }
 
+    fclose(*file);
     sem_close(sem_barier);
     sem_close(sem_oxygen_queue);
     sem_close(sem_hydrogen_queue);
