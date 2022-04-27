@@ -2,7 +2,7 @@
  * @name main.c
  * @brief Multiple processes programming project
  * @authors Marián Tarageľ
- * @date 24.4.2022
+ * @date 27.4.2022
  */
 
 #define _DEFAULT_SOURCE
@@ -26,6 +26,13 @@ int *count_molecules = NULL;
 int *num_of_ox = NULL;
 int *num_of_hyd = NULL;
 FILE **file = NULL;
+sem_t *sem_actions = NULL;
+sem_t *sem_mutex = NULL;
+sem_t *sem_oxygen_queue = NULL;
+sem_t *sem_hydrogen_queue = NULL;
+sem_t *sem_barier = NULL;
+sem_t *sem_create_molecule_h = NULL;
+sem_t *sem_create_molecule_o = NULL;
 
 void handle_error(char *error)
 {
@@ -142,6 +149,30 @@ void delete_sem_files()
     sem_unlink(SEM_BARIER);
 }
 
+void init() {
+    remove("proj2.out");
+    *file = fopen("proj2.out", "w");
+
+    sem_actions = create_semaphores(SEM_ACTIONS, 1);
+    sem_mutex = create_semaphores(SEM_MUTEX, 1);
+    sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
+    sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
+    sem_barier = create_semaphores(SEM_BARIER, 0);
+    sem_create_molecule_h = create_semaphores(SEM_CREATE_MOL_H, 0);
+    sem_create_molecule_o = create_semaphores(SEM_CREATE_MOL_O, 0);
+}
+
+void clean() {
+    sem_close(sem_create_molecule_o);
+    sem_close(sem_create_molecule_h);
+    sem_close(sem_barier);
+    sem_close(sem_oxygen_queue);
+    sem_close(sem_hydrogen_queue);
+    sem_close(sem_mutex);
+    sem_close(sem_actions);
+    fclose(*file);
+}
+
 int count_num_of_mol(int oxy, int hyd)
 {
     int result = 0;
@@ -156,19 +187,17 @@ int count_num_of_mol(int oxy, int hyd)
 
 void oxygen_create_molecule(int idO,int molecule_num, int max_time_of_creation)
 {
-    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
-    sem_t *sem_create_molecule_o = create_semaphores(SEM_CREATE_MOL_O, 0);
-    sem_t *sem_create_molecule_h = create_semaphores(SEM_CREATE_MOL_H, 0);
-
     sem_wait(sem_actions);
     *count_actions += 1;
     fprintf(*file, CREATING_MOL_O, *count_actions, idO, molecule_num);
     fflush(*file);
     sem_post(sem_actions);
 
+    // Wait for hydrogens to come
     sem_wait(sem_create_molecule_o);
     sem_wait(sem_create_molecule_o);
 
+    // Creating molecule
     int num = generate_random_number(max_time_of_creation);
     usleep(num * 1000);
 
@@ -178,28 +207,23 @@ void oxygen_create_molecule(int idO,int molecule_num, int max_time_of_creation)
     fflush(*file);
     sem_post(sem_actions);
 
+    // Signal to hydrogens, than molecule is created
     sem_post(sem_create_molecule_h);
     sem_post(sem_create_molecule_h);
-
-    sem_close(sem_create_molecule_o);
-    sem_close(sem_create_molecule_h);
-    sem_close(sem_actions);
 }
 
 void hydrogen_create_molecule(int idH, int molecule_num)
 {
-    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
-    sem_t *sem_create_molecule_h = create_semaphores(SEM_CREATE_MOL_H, 0);
-    sem_t *sem_create_molecule_o = create_semaphores(SEM_CREATE_MOL_O, 0);
-
     sem_wait(sem_actions);
     *count_actions += 1;
     fprintf(*file, CREATING_MOL_H, *count_actions, idH, molecule_num);
     fflush(*file);
     sem_post(sem_actions);
 
+    // Unlock oxygen
     sem_post(sem_create_molecule_o);
 
+    // Wait for signal from oxygen
     sem_wait(sem_create_molecule_h);
 
     sem_wait(sem_actions);
@@ -207,34 +231,27 @@ void hydrogen_create_molecule(int idH, int molecule_num)
     fprintf(*file, CREATED_MOL_H, *count_actions, idH, molecule_num);
     fflush(*file);
     sem_post(sem_actions);
-
-    sem_close(sem_create_molecule_o);
-    sem_close(sem_create_molecule_h);
-    sem_close(sem_actions);
 }
 
 void oxygen(int idO, long args[])
 {
-    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
-    sem_t *sem_mutex = create_semaphores(SEM_MUTEX, 1);
-    sem_t *sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
-    sem_t *sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
-    sem_t *sem_barier = create_semaphores(SEM_BARIER, 0);
-
     int molecules = count_num_of_mol(args[0], args[1]);
 
+    // Started
     sem_wait(sem_actions);
     *count_actions += 1;
     fprintf(*file, STARTED_O, *count_actions, idO);
     fflush(*file);
     sem_post(sem_actions);
 
+    // Sleeping
     int num = generate_random_number((int)args[2]);
     usleep(num * 1000);
 
+    // Lock mutex
     sem_wait(sem_mutex);
     *oxygens += 1;
-    if ((*hydrogens >= 2) && (*oxygens >= 1)) {
+    if ((*hydrogens >= 2) && (*oxygens >= 1)) { // If there is enough atoms to create molecule, they poped out of queue
         *count_molecules += 1;
         sem_post(sem_hydrogen_queue);
         sem_post(sem_hydrogen_queue);
@@ -252,6 +269,7 @@ void oxygen(int idO, long args[])
     fflush(*file);
     sem_post(sem_actions);
 
+
     if (args[0] < 1 || args[1] < 2) {
         sem_wait(sem_actions);
         *count_actions += 1;
@@ -260,8 +278,8 @@ void oxygen(int idO, long args[])
         sem_post(sem_actions);
     }
     else {
-        sem_wait(sem_oxygen_queue);
-        if (*num_of_ox >= 1 && *num_of_hyd >= 2) {
+        sem_wait(sem_oxygen_queue); // Oxygen queue
+        if (*num_of_ox >= 1 && *num_of_hyd >= 2) { // If atoms can create molecule they can pass, else not enough statement
             oxygen_create_molecule(idO, *count_molecules, args[3]);
             
             sem_wait(sem_barier);
@@ -269,7 +287,7 @@ void oxygen(int idO, long args[])
             
             *num_of_hyd -= 2;
             *num_of_ox -= 1;
-            if (molecules == *count_molecules) {
+            if (molecules == *count_molecules) { // Last oxygen opens all semaphores
                 for (int i = 0; i < (int)args[0] - *count_molecules; i++) {
                     sem_post(sem_oxygen_queue);
                 }
@@ -288,35 +306,27 @@ void oxygen(int idO, long args[])
         }
     }
 
-    fclose(*file);
-    sem_close(sem_barier);
-    sem_close(sem_oxygen_queue);
-    sem_close(sem_hydrogen_queue);
-    sem_close(sem_mutex);
-    sem_close(sem_actions);
+    clean();
     exit(0);
 }
 
 void hydrogen(int idH, long args[])
 {
-    sem_t *sem_actions = create_semaphores(SEM_ACTIONS, 1);
-    sem_t *sem_mutex = create_semaphores(SEM_MUTEX, 1);
-    sem_t *sem_oxygen_queue = create_semaphores(SEM_OXY_QUEUE, 0);
-    sem_t *sem_hydrogen_queue = create_semaphores(SEM_HYDRO_QUEUE, 0);
-    sem_t *sem_barier = create_semaphores(SEM_BARIER, 0);
-
+    // Started
     sem_wait(sem_actions);
     *count_actions += 1;
     fprintf(*file, STARTED_H, *count_actions, idH);
     fflush(*file);
     sem_post(sem_actions);
 
+    // Sleeping
     int num = generate_random_number((int)args[2]);
     usleep(num * 1000);
 
+    // Mutex is locked
     sem_wait(sem_mutex);
     *hydrogens += 1;
-    if ((*hydrogens >= 2) && (*oxygens >= 1)) {
+    if ((*hydrogens >= 2) && (*oxygens >= 1)) { // If there is enough atoms to create molecule, they poped out of queue
         *count_molecules += 1;
         sem_post(sem_hydrogen_queue);
         sem_post(sem_hydrogen_queue);
@@ -342,8 +352,9 @@ void hydrogen(int idH, long args[])
         sem_post(sem_actions);
     }
     else {
+        // Hydrogen queue
         sem_wait(sem_hydrogen_queue);
-        if (*num_of_ox >= 1 && *num_of_hyd >= 2) {
+        if (*num_of_ox >= 1 && *num_of_hyd >= 2) { // If atoms can create molecule they can pass, else not enough statement
             hydrogen_create_molecule(idH, *count_molecules);
             sem_post(sem_barier);
         }
@@ -356,12 +367,7 @@ void hydrogen(int idH, long args[])
         }
     }
 
-    fclose(*file);
-    sem_close(sem_barier);
-    sem_close(sem_oxygen_queue);
-    sem_close(sem_hydrogen_queue);
-    sem_close(sem_mutex);
-    sem_close(sem_actions);
+    clean();
     exit(0);
 }
 
@@ -382,6 +388,7 @@ void create_process(int number, void (*function)(int, long *), long args[])
 
 int main(int argc, char *argv[])
 {
+    // Parse arguments of command line
     if (argc != 5) {
         fprintf(stderr, usage);
         return EXIT_FAILURE;
@@ -415,14 +422,15 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Create file, semaphores and shared memory
     create_shared_memory();
     delete_sem_files();
-    remove("proj2.out");
-    *file = fopen("proj2.out", "w");
+    init();
 
     *num_of_ox = (int)args[0];
     *num_of_hyd = (int)args[1];
 
+    // Create processes
     create_process(args[0], oxygen, args);
     create_process(args[1], hydrogen, args);
 
@@ -430,6 +438,7 @@ int main(int argc, char *argv[])
     int status = 0;
     int number_of_process = (int)args[0] + (int)args[1];
     
+    // Wait for child processes
     for (int i = 0; i < number_of_process; i++) {
         pid = wait(&status);
         if (pid == -1) {
@@ -440,7 +449,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    fclose(*file);
+    // Cleaning used resources
+    clean();
     delete_sem_files();
     delete_shared_memory();
 

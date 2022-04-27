@@ -40,6 +40,16 @@ const char usage[] = "Usage: ./proj2 NO NH TI TB\n"
 #define NOT_ENOUGH_H "%d: H %d: not enough O or H\n"
 
 /**
+ * @brief Intialize file and semaphores
+ */
+void init();
+
+/**
+ * @brief Clean opened file and semaphores
+ */
+void clean();
+
+/**
  * @brief Handle error messages
  * 
  * @param error Name of function that failed
